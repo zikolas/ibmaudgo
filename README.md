@@ -42,17 +42,19 @@ declares `201h-336h`, a hull around the real decode. The card decodes ten
 address lines, so it answers four aliases, and the vendor's own configuration
 tool names the real pairs:
 
-| window 0 (16 bytes) | window 1 (8 bytes) |
+| control block (16 bytes) | data block (8 bytes) |
 |---|---|
 | `250h-25Fh` | `340h-347h` |
 | `650h-65Fh` | `740h-747h` |
 | `A50h-A5Fh` | `B40h-B47h` |
 | `E50h-E5Fh` | `F40h-F47h` |
 
-`/IO1` picks the alias and window 1 is paired automatically; `/IO2` only needs
-giving to break that pairing. `F40h` is the classic Windows Sound System base,
-which is what the four aliases give away: window 1 sits where a WSS block
-would.
+`/IO1` picks the alias and the data block is paired automatically; `/IO2`
+only needs giving to break that pairing. The control block takes the codec's
+control frames and the mode registers; the data block takes the sample stream
+and reports status and the play position. The data block's aliases include
+`F40h`, a classic Windows Sound System base, but it holds no WSS registers;
+0.3 and earlier called it the WSS block.
 
 Other card facts the enabler relies on: config registers at attribute `FFF0h`
 (above the 16 KB probe window, so the attribute window is re-pointed at the

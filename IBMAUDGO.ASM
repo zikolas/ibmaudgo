@@ -1,5 +1,5 @@
 ;==========================================================================
-;  IBMAUDGO 0.3 - unified clean-room DOS enabler for the IBM PCMCIA Audio
+;  IBMAUDGO 0.4 - unified clean-room DOS enabler for the IBM PCMCIA Audio
 ;              Adapter (P/N 0933967, the card whose VERS_1 reads
 ;              "IBM | NON-DSP AUDIO"), three host backends in one .COM:
 ;
@@ -25,10 +25,11 @@
 ;    the vendor's own configuration tool states the real pairs:
 ;        250h-25Fh + 340h-347h        650h-65Fh + 740h-747h
 ;        A50h-A5Fh + B40h-B47h        E50h-E5Fh + F40h-F47h
-;    Window 0 is 16 bytes (IBM's own block), window 1 is 8 bytes and is a
-;    Windows Sound System block - F40h is the classic WSS base, which is
-;    what the four aliases give away.  /IO1 selects the pair; /IO2 only
-;    needs giving to override the pairing.
+;    Window 0 is the 16-byte control block (codec control frames, mode),
+;    window 1 the 8-byte data block (sample FIFO, status, play position).
+;    The data block's aliases include F40h, a classic WSS base, but it
+;    holds no WSS registers (0.3 and earlier called it the WSS block).
+;    /IO1 selects the pair; /IO2 only needs giving to override the pairing.
 ;
 ;    No IRQ by default.  Once steered, the card interrupts every 8.19 ms,
 ;    idle or not; IBM's DOS driver paces on that, but IBM's Windows driver
@@ -130,8 +131,8 @@ n_sock   db 2                         ; CS socket count
 
 ; ---- option block (contiguous: a CS handoff copies o_io1..O_LEN in one
 ;      sweep) -------------------------------------------------------------
-o_io1    dw 0250h                     ; window 0 base, 16 bytes (IBM block)
-o_io2    dw 0340h                     ; window 1 base, 8 bytes (WSS block)
+o_io1    dw 0250h                     ; window 0 base, 16 bytes (control block)
+o_io2    dw 0340h                     ; window 1 base, 8 bytes (data block)
 o_io1gv  db 0                         ; 1 = /IO1 given (selects the pair)
 o_io2gv  db 0                         ; 1 = /IO2 given (overrides the pairing)
 o_irq    db 0                         ; none; /I= takes 5, 10, 11 or 15
@@ -151,7 +152,7 @@ manfid   dw 0                         ; CISTPL_MANFID: TPLMID_MANF
          dw 0                         ;                TPLMID_CARD
 r_irq    db 0FFh                      ; CS granted IRQ (FFh = none)
 r_w0     db 0                         ; window 0 decodes (not an FF wall)
-r_w1   db 0                         ; window 1 (WSS block) decodes
+r_w1   db 0                         ; window 1 (data block) decodes
 r_ccsr   db 0                         ; CCSR readback (expect 00)
 matched  db 0                         ; 1 = MANFID hit (0 = forced)
 k_name   dw n_unk                     ; display name
@@ -206,10 +207,10 @@ P_TUP1_LEN equ 12h
 P_TUPD_LEN equ 14h + TDMAX
 
 p_io:    dw 0                         ; +00 socket
-         dw 0                         ; +02 base port 1 (IBM block, 16 bytes)
+         dw 0                         ; +02 base port 1 (control block, 16 bytes)
          db 0                         ; +04 size 1
          db 0                         ; +05 attrs 1 (0 = 8-bit)
-         dw 0                         ; +06 base port 2 (WSS block, 8 bytes)
+         dw 0                         ; +06 base port 2 (data block, 8 bytes)
          db 0                         ; +08 size 2
          db 0                         ; +09 attrs 2
          db 10                        ; +0A address lines decoded (per CIS)
@@ -510,8 +511,8 @@ cs_configure:
         mov  [p_cfg_cb], ax
         mov  word [p_cfg_cb+2], 0
 
-        ; ---- RequestIO: a 16-byte range (the IBM block) and an 8-byte
-        ;      one (the WSS block).  Not every CS stack honours the
+        ; ---- RequestIO: a 16-byte range (the control block) and an
+        ;      8-byte one (the data block).  Not every CS stack honours the
         ;      16-bit attribute or the same IOAddrLines, so walk the
         ;      candidate pairs until one is accepted. ----------------------
         mov  ax, [o_io1]
@@ -526,7 +527,7 @@ cs_configure:
         cmp  al, 0FFh
         je   .iofail
         mov  [p_io+5], al             ; attrs 1
-        mov  [p_io+9], al             ; attrs 2 - the WSS block is the one
+        mov  [p_io+9], al             ; attrs 2 - the data block is the one
                                       ; the vendor gives a 16-bit data path
         lodsb
         mov  [p_io+0Ah], al           ; address lines decoded
@@ -1853,8 +1854,8 @@ ob_iofatal:
 ;==========================================================================
 ;  PCIC MODE - Intel 82365-class point enabler (port of GSGO.C 1.2).
 ;
-;  Two I/O windows: [o_io1] = the IBM block (16 bytes), [o_io2] = the WSS
-;  block (8 bytes).  The CIS probe picks a host segment no other card has a
+;  Two I/O windows: [o_io1] = the control block (16 bytes), [o_io2] = the
+;  data block (8 bytes).  The CIS probe picks a host segment no other card has a
 ;  memory window on, so scanning never collides with a card another enabler
 ;  has running - and the probe restores an already-running card instead of
 ;  powering it off.  The attribute window is then re-pointed at the COR's
@@ -2005,7 +2006,7 @@ pc_found:
         mov  al, [es:bx+2]
         mov  [r_ccsr], al
 
-        ; ---- two I/O windows: IBM block (16 bytes) + WSS block (8).
+        ; ---- two I/O windows: control block (16 bytes) + data block (8).
         ;      Programmed while DISABLED, enabled in one final write -
         ;      never rewrite an enabled window's bounds in place (a
         ;      half-written window once spanned the link and killed the
@@ -2848,7 +2849,8 @@ report:
         call prchar
 .cornl:
         call crlf
-; line 4: "   IBM block 250h (decoding)  WSS block 340h (decoding)"
+; line 4: "   control 250h ok, data 340h ok, no IRQ" (40 columns; the worst
+; case, both blocks dead plus CCSR and an IRQ, is 63)
         mov  si, m_w0
         call prstr
         mov  ax, [o_io1]
@@ -3334,7 +3336,7 @@ errout:                               ; SI = message; print + exit
 ;==========================================================================
 ;  MESSAGES
 ;==========================================================================
-m_banner:  db 'IBMAUDGO 0.3 - IBM PCMCIA Audio Adapter enabler (PCIC/CS/OB)',13,10,0
+m_banner:  db 'IBMAUDGO 0.4 - IBM PCMCIA Audio Adapter enabler (PCIC/CS/OB)',13,10,0
 m_settle:  db 'Socket is slow: CIS settled after ',0
 m_settle2: db ' x 20ms.',13,10,0
 m_settlot: db '2s or more.',13,10,0
@@ -3374,15 +3376,15 @@ m_corat:   db '   COR @ ',0
 m_index:   db ' index ',0
 m_corok:   db ' (verified)',0
 m_cormis:  db ' (MISMATCH: readback ',0
-m_w0:     db '   IBM block ',0
-m_w0ok:   db 'h (decoding)',0
-m_w0no:   db 'h (FF WALL - not decoding)',0
-m_w1:    db '   WSS block ',0
-m_w1ok:  db 'h (decoding)',0
-m_w1no:  db 'h (FF WALL - not decoding)',0
-m_ccsr:    db '  CCSR ',0
-m_irq:     db '  IRQ ',0
-m_noirq:   db '  no IRQ',0
+m_w0:     db '   control ',0
+m_w0ok:   db 'h ok',0
+m_w0no:   db 'h no decode',0
+m_w1:    db ', data ',0
+m_w1ok:  db 'h ok',0
+m_w1no:  db 'h no decode',0
+m_ccsr:    db ', CCSR ',0
+m_irq:     db ', IRQ ',0
+m_noirq:   db ', no IRQ',0
 m_wins:    db '   I/O windows: ',0
 m_win:     db 'win',0
 m_comma:   db ', ',0
@@ -3406,7 +3408,7 @@ m_obbadsock: db 'Bad /S: OB user sockets are 1..2 (3/4 = internal storage).',13,
 m_obnooff: db '/OFF is not supported in OB mode.',13,10,0
 m_conflict: db ' - port range in use by another card',13,10,0
 m_outwin:  db ' - out of I/O windows',13,10,0
-m_iofail:  db 'IBM/WSS I/O windows unavailable',0
+m_iofail:  db 'Control/data I/O windows unavailable',0
 ; ---- PCIC mode ----
 m_nopcic:  db 'No 82365-class PCIC found (scanned 3E0/3E2/3E4/3E6).',13,10,0
 m_nochip1: db 'No PCIC controller for socket ',0

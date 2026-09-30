@@ -43,7 +43,10 @@ decode. The vendor's `CONFIG.EXE` states it exactly:
 All four pairs share identical low-10 bits, which confirms the 10-line decode:
 the card answers any alias, and the host picks one. `F40H-F47H` is the classic
 Windows Sound System base — so the 8-byte block is the WSS block and the
-16-byte block is IBM's own.
+16-byte block is IBM's own. (Superseded by the I/O trace below: the 8-byte
+block holds no WSS registers. It is the data block, sample FIFO, status and
+play position, and the 16-byte block is the control block. IBMAUDGO uses
+those names from 0.4.)
 
 `AUDIODOC.TXT` agrees: "requires the exclusive use of the memory from 250-25F
 and 340-347". Without Card Services the card is point-enabled through an
