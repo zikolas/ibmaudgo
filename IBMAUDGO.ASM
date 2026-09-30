@@ -59,7 +59,7 @@
 ;    /FORCE    configure without the CIS identity check (needs /S)
 ;    /OFF      PCIC: power the socket down; CS: release + go dormant
 ;
-;  Build (host or on-box):  nasm -f bin IBMAUDGO.ASM -o IBMAUDGO.COM
+;  Build (host or DOS):  nasm -f bin IBMAUDGO.ASM -o IBMAUDGO.COM
 ;
 ;  (C) 2026 zikolas.  GNU General Public License v2 - see LICENSE.
 ;  Clean-room provenance: the card's own CIS read off the hardware, the

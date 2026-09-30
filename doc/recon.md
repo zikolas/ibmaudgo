@@ -207,7 +207,7 @@ three traced rates as the Crystal table predicts. The PC110 keeps up with
 - `PCDIAG` needs Card and Socket Services resident; it fails with
   "Audio Adapter Not Found" without them. Its panel keys are
   **1** = left tone, **2** = right tone, **3** = exit; it runs in a graphics
-  mode that `screen_read` cannot capture.
+  mode, so a text-screen capture shows nothing.
 
 ## Files
 

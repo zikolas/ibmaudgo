@@ -2,7 +2,10 @@
 
 A clean-room DOS enabler for the IBM PCMCIA Audio Adapter (P/N 0933967, the
 card whose CIS reads `IBM | NON-DSP AUDIO`, MANFID `00A4/0022`), built in the
-same shape as our other unified enablers: one `.COM`, three host backends.
+same shape as our other unified enablers
+([ES1688GO](https://github.com/zikolas/es1688go),
+[SCP55GO](https://github.com/zikolas/scp55-enabler),
+[MC8KGO](https://github.com/zikolas/mc8kgo)): one `.COM`, three host backends.
 
     IBMAUDGO [/PCIC|/CS|/OB] [/IO1=250] [/IO2=340] [/I=n] [/S=n]
              [/W=D000] [/FORCE] [/OFF] [/?]
@@ -14,15 +17,31 @@ same shape as our other unified enablers: one `.COM`, three host backends.
 With no mode switch the host is auto-detected: Card Services first, then the
 Socket Services `SS` signature, then an 82365 probe at `3E0h`.
 
-Build, on a host or on the box:
+* `/IO1=hex` — control block base: `250`, `650`, `A50` or `E50` (default 250)
+* `/IO2=hex` — data block base: `340`, `740`, `B40` or `F40` (default: the one
+  paired with `/IO1`)
+* `/I=dec` — route the card's interrupt to IRQ 5, 10, 11 or 15 (default: none)
+* `/S=dec` — socket: PCIC 0-7, OmniBook 1-2; under Card Services, probe only
+  this socket
+* `/W=hex` — segment of the attribute-memory window used to read the CIS and
+  write the COR (PCIC; default `D000`)
+* `/FORCE` — configure without the CIS identity check (needs `/S`)
+* `/OFF` — power the socket down (PCIC), or release the card and go dormant (CS)
+
+Typical use, with the window segment kept out of the memory manager's upper
+memory (for Jemm, `X=DC00-DFFF`):
+
+    IBMAUDGO /W=DC00
+
+Build with NASM, on a modern host or under DOS:
 
     nasm -f bin IBMAUDGO.ASM -o IBMAUDGO.COM
 
 ## What the card is
 
 A WAV player. An IBM ASIC in front of a serial codec keeps a 16K-word sample
-ring on the card; software appends samples to it with word writes to window 1
-and reads back how far the card has played. The card has no Sound Blaster
+ring on the card; software appends samples to it with word writes to the data
+block and reads back how far the card has played. The card has no Sound Blaster
 logic, no DMA and no FM chip, and the MIDI in IBM's Windows software is a
 synthesiser running on the host CPU. The interface was recovered by I/O trace
 of IBM's own DOS WAV player and is written up in [doc/recon.md](doc/recon.md).
@@ -32,8 +51,10 @@ play it once IBMAUDGO has run:
 
 * `probes/IBMPLAY` plays a PCM WAV file: 8- or 16-bit, mono or stereo, at a
   rate from the codec's table.
-* VSBPCMCIA's `/CARD:IBMAUD` backend emulates a Sound Blaster on it for games.
-  DOOM and Epic Pinball play on an IBM PC110.
+* [VSBPCMCIA](https://github.com/zikolas/vsbpcmcia)'s `/CARD:IBMAUD` backend
+  (from v1.3-pre1) emulates a Sound Blaster on it for games: DOOM and Epic
+  Pinball on an IBM PC110, and Monkey Island's AdLib music through its software
+  OPL build on a Toshiba T2130CT.
 
 ## What the card needs
 
@@ -72,7 +93,8 @@ under `/OB` the card is steered to 10 anyway and reported as having none.
 
 ## Status
 
-* PCIC path — bench-proven on an IBM PC110 (2026-09-02). Identifies the card,
+* PCIC path — bench-proven on an IBM PC110 (2026-09-02) and on the ToPIC
+  controller of a Toshiba T2130CT (2026-09-30). Identifies the card,
   writes the COR at `FFF0h` and reads it back verified, and brings both windows
   up decoding. With 0.2's default IRQ 10, the socket read back independently
   matches the running vendor stack on every register that matters: `intctl

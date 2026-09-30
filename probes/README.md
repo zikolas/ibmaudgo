@@ -23,8 +23,9 @@ one found.
 
 ## Building
 
-The C probes are Open Watcom, 16-bit DOS, small model. On the bench they were
-built on the box with `C:\WATCOM\BLD name`; IBMPLAY on the host with
+The C probes are Open Watcom, 16-bit DOS, small model; they were built under
+DOS with a local batch file. IBMPLAY uses `REP OUTSW`, a 186 instruction, so it
+needs `-1`; on a host:
 
     wcl -ms -1 -zq -bt=dos -fe=IBMPLAY.EXE IBMPLAY.C
 
