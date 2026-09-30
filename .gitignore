@@ -1,0 +1,19 @@
+.DS_Store
+*.bak
+*.BAK
+
+# IBM's driver diskettes: read as data, never committed
+vendor/
+
+# probe build outputs; probes/README.md builds them from source
+probes/*.COM
+probes/*.EXE
+probes/*.DLL
+probes/*.OBJ
+probes/*.obj
+probes/*.o
+probes/*.LST
+probes/*.MAP
+
+# Jemm's JLM.INC, fetched separately (probes/README.md)
+probes/jemm/
