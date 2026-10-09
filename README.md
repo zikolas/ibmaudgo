@@ -17,13 +17,13 @@ same shape as our other unified enablers
 With no mode switch the host is auto-detected: Card Services first, then the
 Socket Services `SS` signature, then an 82365 probe at `3E0h`.
 
-On the OmniBook, the ROM runs the card in the C: drive slot in either memory
-mode or I/O mode, depending on the card. The HP and SanDisk SDP5 flash cards
-run in memory mode; a 128 MB ATA card ran in I/O mode. This card needs the
-C: drive slot in memory mode: with the C: card in 16-bit I/O mode, it
-enables but never starts playing. The OmniBook's ROM also maps the card as a
-memory-card drive; IBMAUDGO switches that mapping off where the ROM allows
-it, and the card plays either way.
+On the OmniBook, the stock ROM runs the card in the C: drive slot in memory
+mode only when it is a SanDisk ATA card, such as HP's own flash disks; every
+other ATA card runs in I/O mode. This card needs the C: drive slot in memory
+mode: with the C: card in 16-bit I/O mode, it enables but never starts
+playing. The OmniBook's ROM also maps the card as a memory-card drive;
+IBMAUDGO switches that mapping off where the ROM allows it, and the card
+plays either way.
 
 * `/IO1=hex` — control block base: `250`, `650`, `A50` or `E50` (default 250)
 * `/IO2=hex` — data block base: `340`, `740`, `B40` or `F40` (default: the one
