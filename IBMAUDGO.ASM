@@ -1,5 +1,5 @@
 ;==========================================================================
-;  IBMAUDGO 0.4 - unified clean-room DOS enabler for the IBM PCMCIA Audio
+;  IBMAUDGO 0.5 - unified clean-room DOS enabler for the IBM PCMCIA Audio
 ;              Adapter (P/N 0933967, the card whose VERS_1 reads
 ;              "IBM | NON-DSP AUDIO"), three host backends in one .COM:
 ;
@@ -7,7 +7,7 @@
 ;    /CS    PCMCIA Card Services 2.1 client, stays TSR (hot-plug, live
 ;           reconfigure via resident handoff).
 ;    /OB    HP OmniBook 300/425/430 Socket Services direct, with the
-;           polite I/O window allocator.  UNVERIFIED on this card.
+;           polite I/O window allocator.  Run on an OmniBook 425.
 ;
 ;  With no mode switch the host is auto-detected: Card Services first (if a
 ;  CS arbiter is loaded we must go through it), then the 'SS' Socket
@@ -1343,6 +1343,7 @@ drain_queue:
 FW_NOCARD  equ 0
 FW_DRIVE   equ 1
 FW_UNKNOWN equ 2
+FW_IO16    equ 3                      ; another socket runs 16-bit I/O
 
 ob_mode:
         mov  word [o_wseg], OB_ATTRSEG ; CIS/COR window fixed here (probed)
@@ -1378,6 +1379,8 @@ ob_mode:
 .next:
         call ob_try
         jnc  ob_got
+        cmp  byte [failwhy], FW_IO16  ; ours, but not beside 16-bit I/O
+        je   ob_failx
         inc  byte [sock]
         cmp  byte [sock], 2
         jbe  .next
@@ -1453,6 +1456,8 @@ ob_got:
 
 ; ---------- failure reporting --------------------------------------------
 ob_failx:                             ; /S given; [failwhy] says what
+        cmp  byte [failwhy], FW_IO16
+        je   .w16
         cmp  byte [failwhy], FW_UNKNOWN
         je   .unk
         cmp  byte [failwhy], FW_DRIVE
@@ -1470,6 +1475,14 @@ ob_failx:                             ; /S given; [failwhy] says what
         mov  al, [sock]
         call prdec99
         mov  si, m_indrive
+        call prstr
+        int  20h
+.w16:
+        mov  si, m_socket
+        call prstr
+        mov  al, [sock]
+        call prdec99
+        mov  si, m_io16
         call prstr
         int  20h
 .unk:
@@ -1527,9 +1540,11 @@ ob_try:
         call ob_getstat
         test al, 80h                  ; card detect
         jz   .no
-        call ob_chkdrive
-        jnc  .safe
-        mov  byte [failwhy], FW_DRIVE
+        mov  byte [drvmap], 0         ; the ROM maps an unrecognised card in
+        call ob_chkdrive              ; a user slot as a memory-card drive:
+        jnc  .safe                    ; note it, and let the CIS decide
+        mov  byte [drvmap], 1
+        jmp  .safe
 .no:
         stc
         ret
@@ -1543,6 +1558,8 @@ ob_try:
         xor  di, di
         call ob_ssvc
         jc   .no
+        cmp  byte [drvmap], 0         ; the ROM has this socket up as a drive:
+        jne  .rdyok                   ; no reset, only read the CIS
         mov  cx, 4                    ; ~220ms settle
         call ticks
         mov  ax, 9000h                ; ResetCard
@@ -1590,19 +1607,33 @@ ob_try:
         mov  byte [failwhy], FW_UNKNOWN
         cmp  byte [o_force], 0
         jne  .forced
-        call ob_restw0
+        cmp  byte [drvmap], 0         ; not ours and mapped as a drive: the
+        je   .rj                      ; system's, hands off
+        mov  byte [failwhy], FW_DRIVE
+.rj:    call ob_restw0
         stc
         ret
 .forced:
         call force_ident
 .ok:
-        call ibm_pair               ; model + window 0 default base
-        clc
+        call ob_io16                  ; a 16-bit I/O socket beside it: no
+        jnc  .ok1                     ; use enabling it
+        mov  byte [failwhy], FW_IO16
+        call ob_restw0
+        stc
         ret
+.ok1:
+        call ibm_pair               ; model + window 0 default base
+        cmp  byte [drvmap], 0         ; ours: the ROM's drive mapping on
+        je   .ok2                     ; this user slot goes off first.  The
+        call ob_dropdrive             ; 425's SS may refuse (BAD_TYPE); then
+.ok2:   clc                           ; it stays over the card's common
+        ret                           ; memory, which the audio does not use
 
 ; ---- ob_corwin: the OB equivalent of pc_corwin - ask Socket Services to
 ;      re-map window 0 at the COR's own page (DI is the card offset in the
-;      same page units as SI).  UNVERIFIED: no OmniBook has had this card.
+;      same page units as SI), aligned to the 16 KB window: the SS refuses
+;      an unaligned one (BAD_OFFSET, AH=07, seen at FFF0h on the 425).
 ;      out: BX = the COR's offset within the window
 ob_corwin:
         push ax
@@ -1612,7 +1643,8 @@ ob_corwin:
         push di
         mov  di, [cfgbase]
         mov  cl, 12
-        shr  di, cl                   ; card page
+        shr  di, cl                   ; card page (4 KB units)...
+        and  di, 0FFFCh               ; ...aligned to the 16 KB window
         mov  ax, 8900h
         xor  bh, bh
         mov  bl, [sock]
@@ -1627,7 +1659,7 @@ ob_corwin:
         pop  cx
         pop  ax
         mov  bx, [cfgbase]
-        and  bx, 0FFFh
+        and  bx, 3FFFh                ; the COR's offset in the window
         ret
 
 ; ---- ob_chkdrive: CF=1 if an enabled common-mem window maps [sock] ------
@@ -1651,6 +1683,86 @@ ob_chkdrive:
         cmp  byte [gw_n], 3
         jbe  .w
         clc
+        ret
+
+;---- ob_dropdrive: switch off every enabled COMMON-memory window 1-3 the
+;     ROM mapped onto [sock].  CF=1 if one is still enabled afterwards.
+ob_dropdrive:
+        mov  byte [gw_n], 1
+.w:     mov  ax, 8800h
+        mov  bh, [gw_n]
+        call ob_ssvc
+        jc   .nx
+        cmp  bl, [sock]
+        jne  .nx
+        test dh, 04h                  ; enabled
+        jz   .nx
+        test dh, 02h                  ; attribute space: ours, leave it
+        jnz  .nx
+        and  dh, 0FBh                 ; same window, enable bit off
+        mov  ax, 8900h
+        mov  bh, [gw_n]
+        call ob_ssvc
+        jc   .bad
+        mov  ax, 8800h                ; read back
+        mov  bh, [gw_n]
+        call ob_ssvc
+        test dh, 04h
+        jnz  .bad
+.nx:    inc  byte [gw_n]
+        cmp  byte [gw_n], 3
+        jbe  .w
+        clc
+        ret
+.bad:   stc
+        ret
+
+;---- ob_io16: CF=1 if a socket other than [sock] runs 16-bit I/O.  Then
+;     an 8-bit card's odd registers float and the IBM Audio never plays
+;     (measured on an OmniBook 425 with the C: card in socket 3 in I/O
+;     mode).  VLSI regs via ECh/EDh, as the ROM SS keeps them: reg 0Ah bit
+;     7-(s-1) set = socket s in memory mode; reg 38h-2(s-1) bit 0 = its
+;     16-bit I/O width.  Read-only.
+ob_io16:
+        push ax
+        push bx
+        push cx
+        mov  cl, 0                    ; CL = s-1
+.s:     mov  al, cl
+        inc  al
+        cmp  al, [sock]
+        je   .n
+        mov  bl, 0Ah
+        call vl_rd
+        mov  ah, 80h
+        shr  ah, cl
+        test al, ah
+        jnz  .n                       ; memory mode
+        mov  bl, 38h
+        sub  bl, cl
+        sub  bl, cl
+        call vl_rd
+        test al, 01h
+        jnz  .y
+.n:     inc  cl
+        cmp  cl, 4
+        jb   .s
+        clc
+        jmp  .r
+.y:     stc
+.r:     pop  cx
+        pop  bx
+        pop  ax
+        ret
+
+vl_rd:                                ; BL = EC index -> AL (atomic pair)
+        pushf
+        cli
+        mov  al, bl
+        out  0ECh, al
+        jmp  short $+2
+        in   al, 0EDh
+        popf
         ret
 
 ob_ssvc:
@@ -1816,9 +1928,7 @@ ob_alloc:
 ; is 16 bytes and lets the CARD assert IOCS16, window 1 is 8 bytes and gets
 ; the explicit 16-bit characteristic (SS window flags bit3).  Note that is
 ; the opposite assignment to the card this file was forked from, whose
-; 16-bit block was window 0.  UNVERIFIED on the OB SS - no OmniBook has had
-; this card; if a window reads torn on one, start here (and see
-; ob-io-window-dl-bug for the DL=01h WAIT question on 8-bit I/O windows).
+; 16-bit block was window 0.  Plays this way on an OmniBook 425.
 ob_map_all:
         mov  byte [wcount], 0
         call ob_classify
@@ -3336,7 +3446,7 @@ errout:                               ; SI = message; print + exit
 ;==========================================================================
 ;  MESSAGES
 ;==========================================================================
-m_banner:  db 'IBMAUDGO 0.4 - IBM PCMCIA Audio Adapter enabler (PCIC/CS/OB)',13,10,0
+m_banner:  db 'IBMAUDGO 0.5 - IBM PCMCIA Audio Adapter enabler (PCIC/CS/OB)',13,10,0
 m_settle:  db 'Socket is slow: CIS settled after ',0
 m_settle2: db ' x 20ms.',13,10,0
 m_settlot: db '2s or more.',13,10,0
@@ -3393,6 +3503,9 @@ m_socket:  db 'Socket ',0
 m_nocards: db ': no card present/ready.',13,10,0
 m_nomanf:  db ': card present, but its CIS has no MANFID tuple.',13,10,0
 m_indrive: db ': in use by the system (drive window) - refused.',13,10,0
+m_io16:    db ': another socket (usually the C: drive) runs in 16-bit I/O',13,10
+           db '   mode, and on the OmniBook this card does not work beside it.  It needs',13,10
+           db '   a C: card the OmniBook runs in memory mode, or a PCIC or CS host.',13,10,0
 m_unrec:   db ': unrecognized card - ',0
 m_addman:  db '  Use /F to force, if you are sure.',13,10,0
 m_addman2: db '  Use /F /S=n to force, if you are sure.',13,10,0
@@ -3452,6 +3565,7 @@ o_wgiven:  db 0
 sock:      db 0                       ; current socket (OB/PCIC)
 sawunk:    db 0
 failwhy:   db 0
+drvmap:    db 0                       ; OB: the ROM mapped this socket as a drive
 gotcfg:    db 0
 rep_sock:  db 0                       ; summary inputs
 rep_irq:   db 0FFh

@@ -17,6 +17,14 @@ same shape as our other unified enablers
 With no mode switch the host is auto-detected: Card Services first, then the
 Socket Services `SS` signature, then an 82365 probe at `3E0h`.
 
+On the OmniBook, the ROM runs the card in the C: drive slot in either memory
+mode or I/O mode, depending on the card. The HP and SanDisk SDP5 flash cards
+run in memory mode; a 128 MB ATA card ran in I/O mode. This card needs the
+C: drive slot in memory mode: with the C: card in 16-bit I/O mode, it
+enables but never starts playing. The OmniBook's ROM also maps the card as a
+memory-card drive; IBMAUDGO switches that mapping off where the ROM allows
+it, and the card plays either way.
+
 * `/IO1=hex` — control block base: `250`, `650`, `A50` or `E50` (default 250)
 * `/IO2=hex` — data block base: `340`, `740`, `B40` or `F40` (default: the one
   paired with `/IO1`)
@@ -104,7 +112,9 @@ under `/OB` the card is steered to 10 anyway and reported as having none.
   works too. With no IRQ (`intctl 60`, 0.3's default) it is what the
   VSBPCMCIA backend runs on.
 * CS path — adapted, not yet bench-run.
-* OB path — unverified; no OmniBook has had this card.
+* OB path — bench-proven on an HP OmniBook 425 with its C: card in memory mode:
+  the COR verifies at `FFF0h`, both windows decode, and IBMPLAY plays at the
+  file's rate.
 
 ## Repository
 
